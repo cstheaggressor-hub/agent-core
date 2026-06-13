@@ -9,6 +9,7 @@ export interface RecommendNextEngineInput {
   context: ActionRecommendationContext;
   provider: ActionKnowledgeProvider;
   llmClient?: LLMClient | null;
+  visible_actions?: string[];
   active_plan?: unknown;
   suggested_plan?: unknown;
   recent_outcomes?: unknown[];
@@ -41,6 +42,12 @@ function parseJsonObject(text: string): Record<string, unknown> | null {
   }
 }
 
+function visibleCatalog(catalog: ActionDefinition[], visibleActions?: string[]): ActionDefinition[] {
+  const visible = new Set(visibleActions ?? []);
+  if (visible.size === 0) return catalog;
+  return catalog.filter((action) => visible.has(action.name));
+}
+
 function toRecommendation(raw: Record<string, unknown>, catalog: ActionDefinition[]): ActionRecommendation {
   const actionName = normalizeActionName(raw.action_name ?? raw.next_action ?? raw.recommended_action);
   const action = catalog.find((candidate) => candidate.name === actionName);
@@ -57,9 +64,11 @@ function toRecommendation(raw: Record<string, unknown>, catalog: ActionDefinitio
 
 export async function recommendNext(input: RecommendNextEngineInput): Promise<RecommendNextEngineResult> {
   const catalog = await input.provider.listActions();
+  const filteredCatalog = visibleCatalog(catalog, input.visible_actions);
   const prompt = buildRecommendNextPrompt({
     context: input.context,
     action_catalog: catalog,
+    visible_actions: input.visible_actions,
     active_plan: input.active_plan,
     suggested_plan: input.suggested_plan,
     recent_outcomes: input.recent_outcomes,
@@ -72,7 +81,7 @@ export async function recommendNext(input: RecommendNextEngineInput): Promise<Re
       const response = await input.llmClient.complete(prompt.messages);
       const parsed = parseJsonObject(response.content);
       if (parsed) {
-        const recommendation = toRecommendation(parsed, catalog);
+        const recommendation = toRecommendation(parsed, filteredCatalog);
         const planDecision = coordinateRecommendNext({
           session_id: String(input.context.context.session_id ?? input.context.context["session_id"] ?? "unknown"),
           task_type: input.context.task_type,
@@ -100,7 +109,7 @@ export async function recommendNext(input: RecommendNextEngineInput): Promise<Re
     }
   }
 
-  const routeRecommendation = graphPromptRouteFallbackRecommendation(input.context, catalog);
+  const routeRecommendation = graphPromptRouteFallbackRecommendation(input.context, filteredCatalog);
   if (routeRecommendation) {
     return {
       recommendation: routeRecommendation,
@@ -115,9 +124,11 @@ export async function recommendNext(input: RecommendNextEngineInput): Promise<Re
   }
 
   const recommendations = await input.provider.recommendNextActions(input.context);
+  const visibleNames = new Set(input.visible_actions ?? []);
+  const visibleRecommendations = visibleNames.size === 0 ? recommendations : recommendations.filter((item) => visibleNames.has(item.action_name));
   return {
-    recommendation: recommendations[0] ?? null,
-    recommendations,
+    recommendation: visibleRecommendations[0] ?? null,
+    recommendations: visibleRecommendations,
     prompt_messages: prompt.messages,
     active_plan: input.active_plan,
     suggested_plan: input.suggested_plan,
