@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LLMClient, LLMMessage, LLMResponse } from "../src/llm/LLMClient.js";
+import type { ActionSchema } from "../src/providers/ActionProvider.js";
 import type { ActionDefinition, ActionKnowledgeProvider, ActionRecommendationContext } from "../src/providers/ActionKnowledgeProvider.js";
 import { recommendNext } from "../src/actions/recommend-next/engine.js";
 import { RecommendNextInput } from "../src/schemas/actions.js";
@@ -21,9 +22,9 @@ class StaticLlm implements LLMClient {
 const provider = {
   name: "test-provider",
   status: "mock" as const,
-  register: async (schema: unknown) => schema,
-  list: async () => [],
-  get: async () => null,
+  register: async (schema: ActionSchema) => schema,
+  list: async (): Promise<ActionSchema[]> => [],
+  get: async (): Promise<ActionSchema | null> => null,
   validate: async () => ({ valid: true, errors: [] }),
   execute: async () => ({ success: true, output: {}, duration_ms: 0, execution_mode: "mock" as const }),
   listActions: async () => actions,
