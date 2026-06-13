@@ -140,7 +140,7 @@ export async function recommendNext(input: RecommendNextEngineInput): Promise<Re
 
   if (input.llmClient) {
     try {
-      const response = await input.llmClient.complete(prompt.messages);
+      const response = await input.llmClient.chat(prompt.messages, { json_mode: true, temperature: 0 });
       const parsed = parseJsonObject(response.content);
       if (parsed) {
         const nextTaskDecision = parseNextTaskDecision(parsed);
