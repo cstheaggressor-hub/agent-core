@@ -2,6 +2,7 @@ import type { LLMClient } from "../../llm/LLMClient.js";
 import type { ActionDefinition, ActionKnowledgeProvider, ActionRecommendation, ActionRecommendationContext } from "../../providers/ActionKnowledgeProvider.js";
 import { coordinateRecommendNext } from "./planCoordinator.js";
 import { buildRecommendNextPrompt } from "./promptBuilder.js";
+import { graphPromptRouteFallbackRecommendation } from "./graphPromptRouteFallback.js";
 import type { RecommendNextWithPlanOutput } from "./types.js";
 
 export interface RecommendNextEngineInput {
@@ -22,7 +23,7 @@ export interface RecommendNextEngineResult {
   prompt_messages?: Array<{ role: "system" | "user"; content: string }>;
   active_plan?: unknown;
   suggested_plan?: unknown;
-  source: "llm_recommend_next" | "provider_recommend_next";
+  source: "llm_recommend_next" | "provider_recommend_next" | "engine_prompt_route_fallback";
   advisory_only: true;
   requires_platform_validation: true;
 }
@@ -97,6 +98,20 @@ export async function recommendNext(input: RecommendNextEngineInput): Promise<Re
     } catch {
       // Fall through to provider recommendation. The platform remains advisory-only.
     }
+  }
+
+  const routeRecommendation = graphPromptRouteFallbackRecommendation(input.context, catalog);
+  if (routeRecommendation) {
+    return {
+      recommendation: routeRecommendation,
+      recommendations: [routeRecommendation],
+      prompt_messages: prompt.messages,
+      active_plan: input.active_plan,
+      suggested_plan: input.suggested_plan,
+      source: "engine_prompt_route_fallback",
+      advisory_only: true,
+      requires_platform_validation: true,
+    };
   }
 
   const recommendations = await input.provider.recommendNextActions(input.context);
