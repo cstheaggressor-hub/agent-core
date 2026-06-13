@@ -86,7 +86,7 @@ export const AuditListInput = z.object({
 
 // ── New endpoint schemas (ActionKnowledgeProvider) ────────────────
 
-export const RecommendNextInput = z.object({
+const RecommendNextInputBase = z.object({
   task_type: z.string().min(1),
   current_action: z.string().optional(),
   completed_actions: z.array(z.string()).default([]),
@@ -98,6 +98,14 @@ export const RecommendNextInput = z.object({
   memories: z.array(z.unknown()).default([]),
   session_graph_projection: z.unknown().optional(),
 });
+
+export const RecommendNextInput = RecommendNextInputBase.transform((input) => ({
+  ...input,
+  context: {
+    ...input.context,
+    ...(input.visible_actions.length > 0 ? { visible_actions: input.visible_actions } : {}),
+  },
+}));
 
 export const PlanInput = z.object({
   task_type: z.string().min(1),
