@@ -10,7 +10,7 @@ function matchingOpenStepIds(plan: VisiblePlanArtifact | null, actionName: strin
 
 export function coordinateRecommendNext(input: RecommendNextWithPlanInput, rawRecommendation: Record<string, unknown>): RecommendNextWithPlanOutput {
   const activePlan = input.active_plan ?? getVisiblePlan(input.session_id);
-  const actionName = String(rawRecommendation.action_name ?? rawRecommendation.next_action ?? rawRecommendation.recommended_action ?? "ask_user");
+  const actionName = String(rawRecommendation.action_name ?? rawRecommendation.task_name ?? rawRecommendation.next_action ?? rawRecommendation.recommended_action ?? "ask_user");
   const params = typeof rawRecommendation.params === "object" && rawRecommendation.params !== null
     ? rawRecommendation.params as Record<string, unknown>
     : {};
