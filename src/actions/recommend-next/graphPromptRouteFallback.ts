@@ -21,8 +21,14 @@ function chooseRoute(prompt: string): { route: string; reason: string; confidenc
   return { route: "continue_active", reason: "Prompt appears to continue the active session goal.", confidence: 0.7 };
 }
 
+function hasRoutePromptVisible(context: ActionRecommendationContext): boolean {
+  const raw = context.context["visible_actions"];
+  if (!Array.isArray(raw)) return false;
+  return raw.includes("session.route_prompt");
+}
+
 export function graphPromptRouteFallbackRecommendation(context: ActionRecommendationContext, catalog: ActionDefinition[]): ActionRecommendation | null {
-  if (context.task_type !== "graph_session_chat") return null;
+  if (!hasRoutePromptVisible(context) && context.context["prompt_kind"] !== "graph_session_followup") return null;
   const prompt = String(context.context.prompt ?? context.context.user_prompt ?? "").trim();
   const sessionId = String(context.context.session_id ?? context.context.target_session_id ?? "").trim();
   if (!prompt || !sessionId) return null;
