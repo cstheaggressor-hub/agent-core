@@ -61,6 +61,34 @@ const UnmountSessionRequestSchema = z.object({
   remove_adapter_edges: z.boolean().optional(),
 });
 
+const PromptRouteSchema = z.object({
+  route: z.enum(["continue_active", "question_only", "create_child_goal", "create_sibling_goal"]),
+  target_session_id: z.string().min(1),
+  prompt: z.string().min(1),
+  reason: z.string().min(1),
+});
+
+export const session_route_prompt = graphAction(
+  "session.route_prompt",
+  "Classify a follow-up prompt for a graph session before the platform creates work, answers only, or spawns a goal session.",
+  PromptRouteSchema,
+  {
+    risk: "low",
+    side_effects: [],
+    planner_guidance: "Use for graph-session chat follow-ups. Choose continue_active for normal execution under the current goal, question_only for explanatory prompts, create_child_goal for explicit subtasks in the same context, and create_sibling_goal for explicit unrelated/new goals. This only recommends routing; the platform applies graph changes.",
+    output_json_schema: {
+      type: "object",
+      properties: {
+        route: { type: "string" },
+        target_session_id: { type: "string" },
+        prompt: { type: "string" },
+        reason: { type: "string" },
+      },
+      required: ["route", "target_session_id", "prompt", "reason"],
+    },
+  },
+);
+
 export const session_mount = graphAction(
   "session.mount",
   "Mount a source session under a target session, optionally creating an adapter session and context projection.",
@@ -119,6 +147,7 @@ export const session_unmount = graphAction(
 );
 
 export const SESSION_GRAPH_ACTIONS: CanonicalAction[] = [
+  session_route_prompt,
   session_mount,
   session_mount_preview,
   session_adapt,
