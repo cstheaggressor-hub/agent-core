@@ -91,6 +91,11 @@ export const RecommendNextInput = z.object({
   current_action: z.string().optional(),
   completed_actions: z.array(z.string()).default([]),
   context: z.record(z.unknown()).default({}),
+  active_plan: z.unknown().optional(),
+  suggested_plan: z.unknown().optional(),
+  recent_outcomes: z.array(z.unknown()).default([]),
+  memories: z.array(z.unknown()).default([]),
+  session_graph_projection: z.unknown().optional(),
 });
 
 export const PlanInput = z.object({
