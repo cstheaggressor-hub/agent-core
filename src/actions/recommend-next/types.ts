@@ -10,6 +10,7 @@ export interface RecommendNextPromptSource {
 export interface RecommendNextPromptInput {
   context: ActionRecommendationContext;
   action_catalog: ActionDefinition[];
+  visible_actions?: string[];
   active_plan?: unknown;
   suggested_plan?: unknown;
   recent_outcomes?: unknown[];
