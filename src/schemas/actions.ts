@@ -91,6 +91,7 @@ export const RecommendNextInput = z.object({
   current_action: z.string().optional(),
   completed_actions: z.array(z.string()).default([]),
   context: z.record(z.unknown()).default({}),
+  visible_actions: z.array(z.string()).default([]),
   active_plan: z.unknown().optional(),
   suggested_plan: z.unknown().optional(),
   recent_outcomes: z.array(z.unknown()).default([]),
