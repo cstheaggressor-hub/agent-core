@@ -16,6 +16,7 @@ import { LLMPlanRequestSchema, ValidatePlanRequestSchema } from "./actionPlanSch
 import type { PlanResponse } from "./actionPlanSchemas.js";
 import { generatePlan } from "./ActionPlanner.js";
 import { validatePlanDeterministic } from "./actionPlanValidator.js";
+import { recommendNext } from "./recommend-next/engine.js";
 import type { ActionKnowledgeProvider } from "../providers/ActionKnowledgeProvider.js";
 import type { RuleSolverProvider } from "../providers/RuleSolverProvider.js";
 import type { SessionProvider } from "../providers/SessionProvider.js";
@@ -372,8 +373,9 @@ export async function actionRoutes(app: FastifyInstance): Promise<void> {
   /**
    * POST /actions/recommend-next — Stepwise recommendations.
    *
-   * For agents that operate step-by-step. Delegates to
-   * ActionKnowledgeProvider.recommendNextActions().
+   * For agents that operate step-by-step. Uses the recommend-next engine so
+   * prompt-builder sources, visible plan context, and session graph projection
+   * are available to both LLM and provider fallback recommendations.
    */
   app.post("/actions/recommend-next", async (req) => {
     const provider = getProvider("action");
@@ -381,13 +383,21 @@ export async function actionRoutes(app: FastifyInstance): Promise<void> {
       return { error: "ActionKnowledgeProvider not available", recommendations: [] };
     }
     const body = RecommendNextInput.parse(req.body);
-    const recommendations = await (provider as ActionKnowledgeProvider).recommendNextActions({
-      task_type: body.task_type,
-      current_action: body.current_action,
-      completed_actions: body.completed_actions,
-      context: body.context,
+    return recommendNext({
+      context: {
+        task_type: body.task_type,
+        current_action: body.current_action,
+        completed_actions: body.completed_actions,
+        context: { ...body.context, task_type: body.task_type },
+      },
+      provider: provider as ActionKnowledgeProvider,
+      llmClient: resolveLLMClient(),
+      active_plan: body.active_plan,
+      suggested_plan: body.suggested_plan,
+      recent_outcomes: body.recent_outcomes,
+      memories: body.memories,
+      session_graph_projection: body.session_graph_projection,
     });
-    return { recommendations };
   });
 
   /**
