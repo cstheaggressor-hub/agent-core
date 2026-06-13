@@ -8,14 +8,16 @@ function clip(value: string, max = 5000): string {
   return value.length > max ? `${value.slice(0, max)}\n...<truncated>` : value;
 }
 
-function graphPromptRoutingGuidance(context: unknown): RecommendNextPromptSource | null {
-  const record = context && typeof context === "object" ? context as Record<string, unknown> : {};
-  if (record.task_type !== "graph_session_chat" && record.prompt_kind !== "graph_session_followup") return null;
+function graphPromptRoutingGuidance(input: RecommendNextPromptInput): RecommendNextPromptSource | null {
+  const record = input.context.context && typeof input.context.context === "object" ? input.context.context as Record<string, unknown> : {};
+  const routeOnlyPass = (input.visible_actions ?? []).includes("session.route_prompt");
+  if (!routeOnlyPass && record.prompt_kind !== "graph_session_followup") return null;
   return {
     name: "graph_session_prompt_routing_policy",
     priority: 95,
     content: {
       required_action: "session.route_prompt",
+      source_of_truth: "visible_actions/call-site phase, not inferred task_type",
       routes: {
         continue_active: "Use for ordinary follow-up implementation, refinement, validation, or execution under the current session goal.",
         question_only: "Use for explanation, reasoning, status, or clarification prompts where no work item or new goal should be created.",
@@ -40,7 +42,7 @@ function visibleActionCatalog(input: RecommendNextPromptInput) {
 }
 
 export function buildRecommendNextPrompt(input: RecommendNextPromptInput): RecommendNextPromptMessages {
-  const routingGuidance = graphPromptRoutingGuidance(input.context.context);
+  const routingGuidance = graphPromptRoutingGuidance(input);
   const actionCatalog = visibleActionCatalog(input);
   const sources: RecommendNextPromptSource[] = [
     { name: "current_context", priority: 100, content: input.context },
@@ -76,7 +78,7 @@ export function buildRecommendNextPrompt(input: RecommendNextPromptInput): Recom
           "You are the recommend-next engine for an autonomous coding platform.",
           "Choose exactly one next action. Do not return a multi-step plan.",
           "Only choose from the rendered action_catalog. If visible_actions is present, no other actions are available.",
-          "For graph_session_chat follow-ups, choose session.route_prompt and set its params.route.",
+          "If visible_actions contains only session.route_prompt, this is a routing pass; choose session.route_prompt regardless of broad task_type uncertainty.",
           "The visible plan is advisory UI state. It may guide you, but execution must follow your single next-action decision.",
           "If your selected action deviates from the active or suggested plan, set requires_plan_revision=true and explain why.",
           "Return strict JSON with action_name, params, confidence, rationale, plan_alignment, aligned_plan_step_ids, deviation_reason, requires_plan_revision.",
