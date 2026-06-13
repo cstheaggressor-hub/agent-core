@@ -16,7 +16,8 @@ function graphPromptRoutingGuidance(input: RecommendNextPromptInput): RecommendN
     name: "graph_session_prompt_routing_policy",
     priority: 95,
     content: {
-      required_action: "session.route_prompt",
+      required_task_name: "session.route_prompt",
+      required_decision: "execute",
       source_of_truth: "visible_actions/call-site phase, not inferred task_type",
       routes: {
         continue_active: "Use for ordinary follow-up implementation, refinement, validation, or execution under the current session goal.",
@@ -45,11 +46,11 @@ export function buildRecommendNextPrompt(input: RecommendNextPromptInput): Recom
   const routingGuidance = graphPromptRoutingGuidance(input);
   const actionCatalog = visibleActionCatalog(input);
   const sources: RecommendNextPromptSource[] = [
-    { name: "current_context", priority: 100, content: input.context },
+    { name: "current_state", priority: 100, content: input.context },
     ...(routingGuidance ? [routingGuidance] : []),
-    ...(input.visible_actions && input.visible_actions.length > 0 ? [{ name: "visible_actions", priority: 92, content: input.visible_actions }] : []),
+    ...(input.visible_actions && input.visible_actions.length > 0 ? [{ name: "visible_tasks", priority: 92, content: input.visible_actions }] : []),
     {
-      name: "action_catalog",
+      name: "available_tasks",
       priority: 90,
       content: actionCatalog.map((action) => ({
         name: action.name,
@@ -75,13 +76,26 @@ export function buildRecommendNextPrompt(input: RecommendNextPromptInput): Recom
       {
         role: "system",
         content: [
-          "You are the recommend-next engine for an autonomous coding platform.",
-          "Choose exactly one next action. Do not return a multi-step plan.",
-          "Only choose from the rendered action_catalog. If visible_actions is present, no other actions are available.",
-          "If visible_actions contains only session.route_prompt, this is a routing pass; choose session.route_prompt regardless of broad task_type uncertainty.",
-          "The visible plan is advisory UI state. It may guide you, but execution must follow your single next-action decision.",
-          "If your selected action deviates from the active or suggested plan, set requires_plan_revision=true and explain why.",
-          "Return strict JSON with action_name, params, confidence, rationale, plan_alignment, aligned_plan_step_ids, deviation_reason, requires_plan_revision.",
+          "You are the Next Task Isolation Controller for an AI coding platform.",
+          "Choose exactly one next task. Do not execute tools, write code, or create a full plan.",
+          "The platform loop is: observe current state -> choose one next task -> platform validates -> platform executes -> observe result -> repeat.",
+          "Choose exactly one decision: execute, find_out_more, ask_user, or stop.",
+          "execute means perform a known task now.",
+          "find_out_more means perform a read-only or low-risk task to increase certainty.",
+          "ask_user means ask for missing information only when tools cannot materially improve certainty.",
+          "stop means the goal is satisfied, blocked, cancelled, unsafe to continue, or waiting for user input.",
+          "Be conservative. Prefer find_out_more over guessing. Prefer ask_user only when available tools cannot materially improve certainty.",
+          "Do not modify files unless the requested change, target, and success criteria are clear.",
+          "Do not run commands unless the command is known, scoped, and relevant.",
+          "Do not repeat a failed action with the same inputs unless new information changes the expected result.",
+          "Only choose task_name values from available_tasks, except stop may use task_name=stop.",
+          "If visible_tasks is present, no other task names are available.",
+          "If visible_tasks contains only session.route_prompt, this is a routing pass; return decision=execute and task_name=session.route_prompt.",
+          "Certainty means confidence that the selected next task is the right next task, not confidence that the whole user goal is solved.",
+          "Minimum certainty thresholds: read_only >= 0.55, execution >= 0.75, modification >= 0.85, external_side_effect >= 0.95 with explicit platform approval.",
+          "If certainty is below the threshold for the selected task stakes, choose a lower-stakes find_out_more task or ask_user.",
+          "Put all executable details in params, not only in reason or progress_note.",
+          "Return strict JSON only with keys: decision, task_name, params, certainty, stakes, risk, reason, progress_note, missing_information, expected_result, success_criteria, forbidden_actions.",
         ].join("\n"),
       },
       {
