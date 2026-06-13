@@ -42,8 +42,17 @@ function parseJsonObject(text: string): Record<string, unknown> | null {
   }
 }
 
-function visibleCatalog(catalog: ActionDefinition[], visibleActions?: string[]): ActionDefinition[] {
-  const visible = new Set(visibleActions ?? []);
+function contextVisibleActions(context: ActionRecommendationContext): string[] {
+  const raw = context.context["visible_actions"];
+  return Array.isArray(raw) ? raw.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
+}
+
+function effectiveVisibleActions(input: RecommendNextEngineInput): string[] {
+  return input.visible_actions && input.visible_actions.length > 0 ? input.visible_actions : contextVisibleActions(input.context);
+}
+
+function visibleCatalog(catalog: ActionDefinition[], visibleActions: string[]): ActionDefinition[] {
+  const visible = new Set(visibleActions);
   if (visible.size === 0) return catalog;
   return catalog.filter((action) => visible.has(action.name));
 }
@@ -64,11 +73,12 @@ function toRecommendation(raw: Record<string, unknown>, catalog: ActionDefinitio
 
 export async function recommendNext(input: RecommendNextEngineInput): Promise<RecommendNextEngineResult> {
   const catalog = await input.provider.listActions();
-  const filteredCatalog = visibleCatalog(catalog, input.visible_actions);
+  const visibleActions = effectiveVisibleActions(input);
+  const filteredCatalog = visibleCatalog(catalog, visibleActions);
   const prompt = buildRecommendNextPrompt({
     context: input.context,
     action_catalog: catalog,
-    visible_actions: input.visible_actions,
+    visible_actions: visibleActions,
     active_plan: input.active_plan,
     suggested_plan: input.suggested_plan,
     recent_outcomes: input.recent_outcomes,
@@ -124,7 +134,7 @@ export async function recommendNext(input: RecommendNextEngineInput): Promise<Re
   }
 
   const recommendations = await input.provider.recommendNextActions(input.context);
-  const visibleNames = new Set(input.visible_actions ?? []);
+  const visibleNames = new Set(visibleActions);
   const visibleRecommendations = visibleNames.size === 0 ? recommendations : recommendations.filter((item) => visibleNames.has(item.action_name));
   return {
     recommendation: visibleRecommendations[0] ?? null,
