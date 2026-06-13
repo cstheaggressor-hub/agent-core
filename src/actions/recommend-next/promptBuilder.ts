@@ -33,15 +33,23 @@ function graphPromptRoutingGuidance(context: unknown): RecommendNextPromptSource
   };
 }
 
+function visibleActionCatalog(input: RecommendNextPromptInput) {
+  const visible = new Set(input.visible_actions ?? []);
+  if (visible.size === 0) return input.action_catalog;
+  return input.action_catalog.filter((action) => visible.has(action.name));
+}
+
 export function buildRecommendNextPrompt(input: RecommendNextPromptInput): RecommendNextPromptMessages {
   const routingGuidance = graphPromptRoutingGuidance(input.context.context);
+  const actionCatalog = visibleActionCatalog(input);
   const sources: RecommendNextPromptSource[] = [
     { name: "current_context", priority: 100, content: input.context },
     ...(routingGuidance ? [routingGuidance] : []),
+    ...(input.visible_actions && input.visible_actions.length > 0 ? [{ name: "visible_actions", priority: 92, content: input.visible_actions }] : []),
     {
       name: "action_catalog",
       priority: 90,
-      content: input.action_catalog.map((action) => ({
+      content: actionCatalog.map((action) => ({
         name: action.name,
         description: action.description,
         risk: action.risk,
@@ -67,7 +75,8 @@ export function buildRecommendNextPrompt(input: RecommendNextPromptInput): Recom
         content: [
           "You are the recommend-next engine for an autonomous coding platform.",
           "Choose exactly one next action. Do not return a multi-step plan.",
-          "For graph_session_chat follow-ups, normally choose session.route_prompt and set its params.route.",
+          "Only choose from the rendered action_catalog. If visible_actions is present, no other actions are available.",
+          "For graph_session_chat follow-ups, choose session.route_prompt and set its params.route.",
           "The visible plan is advisory UI state. It may guide you, but execution must follow your single next-action decision.",
           "If your selected action deviates from the active or suggested plan, set requires_plan_revision=true and explain why.",
           "Return strict JSON with action_name, params, confidence, rationale, plan_alignment, aligned_plan_step_ids, deviation_reason, requires_plan_revision.",
