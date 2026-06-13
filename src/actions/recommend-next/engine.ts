@@ -1,5 +1,6 @@
 import type { LLMClient } from "../../llm/LLMClient.js";
 import type { ActionDefinition, ActionKnowledgeProvider, ActionRecommendation, ActionRecommendationContext } from "../../providers/ActionKnowledgeProvider.js";
+import { NextActionWithSessionUpdateSchema, type NextActionWithSessionUpdate } from "../../sessions/sessionUpdateProposal.js";
 import { coordinateRecommendNext } from "./planCoordinator.js";
 import { buildRecommendNextPrompt } from "./promptBuilder.js";
 import { graphPromptRouteFallbackRecommendation } from "./graphPromptRouteFallback.js";
@@ -20,11 +21,12 @@ export interface RecommendNextEngineInput {
 export interface RecommendNextEngineResult {
   recommendation: ActionRecommendation | null;
   recommendations: ActionRecommendation[];
+  next_task_decision?: NextActionWithSessionUpdate;
   plan_decision?: RecommendNextWithPlanOutput;
   prompt_messages?: Array<{ role: "system" | "user"; content: string }>;
   active_plan?: unknown;
   suggested_plan?: unknown;
-  source: "llm_recommend_next" | "provider_recommend_next" | "engine_prompt_route_fallback";
+  source: "llm_next_task_decision" | "llm_recommend_next" | "provider_recommend_next" | "engine_prompt_route_fallback";
   advisory_only: true;
   requires_platform_validation: true;
 }
@@ -57,6 +59,43 @@ function visibleCatalog(catalog: ActionDefinition[], visibleActions: string[]): 
   return catalog.filter((action) => visible.has(action.name));
 }
 
+function parseNextTaskDecision(raw: Record<string, unknown>): NextActionWithSessionUpdate | null {
+  const parsed = NextActionWithSessionUpdateSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+function questionFromDecision(decision: NextActionWithSessionUpdate): string {
+  const explicit = decision.params["question"];
+  if (typeof explicit === "string" && explicit.trim()) return explicit;
+  const missing = decision.missing_information[0];
+  if (missing) return `Please provide ${missing}.`;
+  return decision.reason || "I need more information before continuing.";
+}
+
+function toRecommendationFromDecision(decision: NextActionWithSessionUpdate, catalog: ActionDefinition[]): ActionRecommendation | null {
+  if (decision.decision === "stop") return null;
+
+  let actionName = decision.task_name;
+  let params = decision.params && typeof decision.params === "object" ? decision.params as Record<string, unknown> : {};
+  let action = catalog.find((candidate) => candidate.name === actionName);
+
+  if (decision.decision === "ask_user" && !action) {
+    actionName = "ask_user";
+    params = { question: questionFromDecision(decision) };
+    action = catalog.find((candidate) => candidate.name === actionName);
+  }
+
+  return {
+    action_name: actionName,
+    params,
+    schema_valid: Boolean(action),
+    requires_platform_validation: true,
+    requires_approval: false,
+    confidence: decision.certainty,
+    rationale: decision.reason,
+  };
+}
+
 function toRecommendation(raw: Record<string, unknown>, catalog: ActionDefinition[]): ActionRecommendation {
   const actionName = normalizeActionName(raw.action_name ?? raw.next_action ?? raw.recommended_action);
   const action = catalog.find((candidate) => candidate.name === actionName);
@@ -69,6 +108,19 @@ function toRecommendation(raw: Record<string, unknown>, catalog: ActionDefinitio
     confidence: typeof raw.confidence === "number" ? raw.confidence : typeof raw.certainty === "number" ? raw.certainty : 0.5,
     rationale: typeof raw.rationale === "string" ? raw.rationale : typeof raw.reason === "string" ? raw.reason : "recommend-next selected this action",
   };
+}
+
+function coordinateRecommendation(input: RecommendNextEngineInput, raw: Record<string, unknown>): RecommendNextWithPlanOutput {
+  return coordinateRecommendNext({
+    session_id: String(input.context.context.session_id ?? input.context.context["session_id"] ?? "unknown"),
+    task_type: input.context.task_type,
+    current_action: input.context.current_action,
+    completed_actions: input.context.completed_actions,
+    context: input.context.context,
+    active_plan: input.active_plan as never,
+    suggested_plan: input.suggested_plan as never,
+    recent_action_outcomes: (input.recent_outcomes ?? []) as Record<string, unknown>[],
+  }, raw);
 }
 
 export async function recommendNext(input: RecommendNextEngineInput): Promise<RecommendNextEngineResult> {
@@ -91,17 +143,28 @@ export async function recommendNext(input: RecommendNextEngineInput): Promise<Re
       const response = await input.llmClient.complete(prompt.messages);
       const parsed = parseJsonObject(response.content);
       if (parsed) {
+        const nextTaskDecision = parseNextTaskDecision(parsed);
+        if (nextTaskDecision) {
+          const recommendation = toRecommendationFromDecision(nextTaskDecision, filteredCatalog);
+          const rawForPlan = recommendation
+            ? { action_name: recommendation.action_name, params: recommendation.params, confidence: nextTaskDecision.certainty, rationale: nextTaskDecision.reason }
+            : { action_name: nextTaskDecision.task_name, params: nextTaskDecision.params, confidence: nextTaskDecision.certainty, rationale: nextTaskDecision.reason };
+          return {
+            recommendation,
+            recommendations: recommendation ? [recommendation] : [],
+            next_task_decision: nextTaskDecision,
+            plan_decision: recommendation ? coordinateRecommendation(input, rawForPlan) : undefined,
+            prompt_messages: prompt.messages,
+            active_plan: input.active_plan,
+            suggested_plan: input.suggested_plan,
+            source: "llm_next_task_decision",
+            advisory_only: true,
+            requires_platform_validation: true,
+          };
+        }
+
         const recommendation = toRecommendation(parsed, filteredCatalog);
-        const planDecision = coordinateRecommendNext({
-          session_id: String(input.context.context.session_id ?? input.context.context["session_id"] ?? "unknown"),
-          task_type: input.context.task_type,
-          current_action: input.context.current_action,
-          completed_actions: input.context.completed_actions,
-          context: input.context.context,
-          active_plan: input.active_plan as never,
-          suggested_plan: input.suggested_plan as never,
-          recent_action_outcomes: (input.recent_outcomes ?? []) as Record<string, unknown>[],
-        }, parsed);
+        const planDecision = coordinateRecommendation(input, parsed);
         return {
           recommendation,
           recommendations: [recommendation],
